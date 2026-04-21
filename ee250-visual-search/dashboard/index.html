@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EE250 — Visual Search</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0a0a0a;
+  --surface:  #141414;
+  --surface2: #1c1c1c;
+  --border:   #2a2a2a;
+  --gold:     #c8a96e;
+  --gold-dim: #7a6440;
+  --text:     #e0e0e0;
+  --muted:    #666;
+  --green:    #4ade80;
+  --flash:    rgba(74, 222, 128, 0.18);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ───────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.wordmark {
+  font-family: 'Courier New', monospace;
+  font-size: .85rem;
+  letter-spacing: 3px;
+  color: var(--gold);
+}
+
+.hdr-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.scan-counter {
+  font-family: 'Courier New', monospace;
+  font-size: .72rem;
+  color: var(--muted);
+}
+.scan-counter span { color: var(--gold); }
+
+#scanStatus {
+  font-size: .72rem;
+  font-family: 'Courier New', monospace;
+  color: var(--muted);
+  min-width: 80px;
+  text-align: right;
+}
+#scanStatus.scanning { color: var(--gold); }
+
+/* ── Main layout ──────────────────────────────────────── */
+.layout {
+  display: grid;
+  grid-template-columns: 60fr 40fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  body { overflow: auto; height: auto; }
+  .layout { grid-template-columns: 1fr; height: auto; }
+}
+
+/* ── Stream panel ─────────────────────────────────────── */
+.stream-panel {
+  position: relative;
+  background: #000;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stream-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#streamImg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+#streamOffline {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Courier New', monospace;
+  font-size: .85rem;
+  color: var(--muted);
+  flex-direction: column;
+  gap: 8px;
+}
+
+.live-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(0,0,0,.6);
+  border: 1px solid var(--green);
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-family: 'Courier New', monospace;
+  font-size: .7rem;
+  color: var(--green);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: blink 1.2s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+/* green flash border on detection */
+.stream-wrap.flash-detect {
+  animation: detect-flash .5s ease-out;
+}
+@keyframes detect-flash {
+  0%   { box-shadow: inset 0 0 0 3px var(--green); }
+  100% { box-shadow: inset 0 0 0 0px transparent; }
+}
+
+/* controls bar */
+.controls {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+button {
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  font-size: .75rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all .2s ease;
+}
+button:hover { border-color: var(--gold); color: var(--gold); }
+button:active { transform: scale(.97); }
+
+#pauseBtn.paused { border-color: #ff6b6b; color: #ff6b6b; }
+
+#lastScan {
+  margin-left: auto;
+  font-family: 'Courier New', monospace;
+  font-size: .7rem;
+  color: var(--muted);
+  align-self: center;
+}
+
+/* hidden canvas */
+#captureCanvas { display: none; }
+
+/* ── Results panel ────────────────────────────────────── */
+.results-panel {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.results-panel::-webkit-scrollbar { width: 4px; }
+.results-panel::-webkit-scrollbar-track { background: transparent; }
+.results-panel::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* placeholder */
+#placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+.terminal-placeholder {
+  font-family: 'Courier New', monospace;
+  font-size: .8rem;
+  color: var(--muted);
+  line-height: 2;
+}
+.cursor {
+  display: inline-block;
+  width: 8px; height: 1em;
+  background: var(--gold);
+  vertical-align: middle;
+  animation: blink .8s step-end infinite;
+}
+
+/* result content */
+#resultContent {
+  display: none;
+  padding: 20px;
+  flex-direction: column;
+  gap: 18px;
+}
+#resultContent.visible { display: flex; }
+
+/* staggered fade-in */
+.r-section {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .3s ease, transform .3s ease;
+}
+.r-section.in { opacity: 1; transform: translateY(0); }
+
+.r-label {
+  font-family: 'Courier New', monospace;
+  font-size: .62rem;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+
+/* item name */
+#rItemName {
+  font-size: 1.4rem;
+  font-family: 'Courier New', monospace;
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+/* category badge */
+#rCategory {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 20px;
+  font-size: .72rem;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+.cat-tops      { background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.3); }
+.cat-bottoms   { background: rgba(34,197,94,.15);  color: #4ade80; border: 1px solid rgba(34,197,94,.3); }
+.cat-outerwear { background: rgba(249,115,22,.15); color: #fb923c; border: 1px solid rgba(249,115,22,.3); }
+.cat-footwear  { background: rgba(168,85,247,.15); color: #c084fc; border: 1px solid rgba(168,85,247,.3); }
+.cat-accessory { background: rgba(200,169,110,.15);color: var(--gold); border: 1px solid rgba(200,169,110,.3); }
+.cat-default   { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+/* description */
+#rDescription {
+  font-size: .82rem;
+  color: #999;
+  line-height: 1.7;
+}
+
+/* tags */
+.tags-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+.style-tag {
+  padding: 3px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: .7rem;
+  font-family: 'Courier New', monospace;
+  color: var(--muted);
+  letter-spacing: .5px;
+}
+
+/* price */
+#rPrice {
+  font-size: 1.6rem;
+  font-family: 'Courier New', monospace;
+  color: var(--gold);
+  font-weight: 700;
+}
+.price-sub {
+  font-size: .7rem;
+  color: var(--muted);
+  margin-top: 2px;
+  font-family: 'Courier New', monospace;
+}
+
+/* brands */
+#rBrands { font-size: .8rem; color: var(--muted); }
+#rBrands span { color: var(--text); }
+
+/* search links */
+.search-links { display: flex; flex-direction: column; gap: 4px; }
+.shop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  text-decoration: none;
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  font-size: .75rem;
+  transition: all .2s ease;
+}
+.shop-row:hover { border-color: var(--gold); color: var(--gold); }
+.shop-row .arrow { color: var(--gold-dim); font-size: .8rem; }
+
+/* timestamp footer */
+.result-footer {
+  border-top: 1px solid var(--border);
+  padding: 14px 20px;
+  font-family: 'Courier New', monospace;
+  font-size: .7rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  background: var(--surface);
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wordmark">VISUAL SEARCH / EE250</div>
+  <div class="hdr-right">
+    <div class="scan-counter">DETECTIONS: <span id="detectCount">0</span></div>
+    <div id="scanStatus">idle</div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- Left: live stream -->
+  <div class="stream-panel">
+    <div class="stream-wrap" id="streamWrap">
+      <img id="streamImg" src="/video_feed" alt="live stream" crossorigin="anonymous">
+      <div id="streamOffline">
+        <svg width="32" height="32" fill="none" stroke="#444" stroke-width="1.5" viewBox="0 0 24 24">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        Camera offline
+      </div>
+      <div class="live-badge">
+        <div class="live-dot"></div>LIVE
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="pauseBtn">⏸ PAUSE</button>
+      <button id="scanNowBtn">⚡ SCAN NOW</button>
+      <span id="lastScan">—</span>
+    </div>
+
+    <canvas id="captureCanvas"></canvas>
+  </div>
+
+  <!-- Right: results -->
+  <div class="results-panel" id="resultsPanel">
+    <div id="placeholder">
+      <div class="terminal-placeholder">
+        <div>&gt; VISUAL SEARCH v1.0</div>
+        <div>&gt; CAMERA CONNECTED</div>
+        <div>&gt; WAITING FOR ITEM...</div>
+        <div>&gt; <span class="cursor"></span></div>
+      </div>
+    </div>
+
+    <div id="resultContent">
+      <!-- Item name -->
+      <div class="r-section" id="s0">
+        <div id="rItemName">—</div>
+      </div>
+
+      <!-- Category -->
+      <div class="r-section" id="s1">
+        <div class="r-label">Category</div>
+        <span id="rCategory">—</span>
+      </div>
+
+      <!-- Description -->
+      <div class="r-section" id="s2">
+        <div class="r-label">Style</div>
+        <div id="rDescription">—</div>
+      </div>
+
+      <!-- Tags -->
+      <div class="r-section" id="s3">
+        <div class="r-label">Tags</div>
+        <div class="tags-wrap" id="rTags"></div>
+      </div>
+
+      <!-- Price -->
+      <div class="r-section" id="s4">
+        <div class="r-label">Estimate</div>
+        <div id="rPrice">—</div>
+        <div class="price-sub">estimated retail</div>
+      </div>
+
+      <!-- Brands -->
+      <div class="r-section" id="s5">
+        <div class="r-label">Similar to</div>
+        <div id="rBrands">—</div>
+      </div>
+
+      <!-- Search links -->
+      <div class="r-section" id="s6">
+        <div class="r-label">Shop</div>
+        <div class="search-links" id="rLinks"></div>
+      </div>
+    </div>
+
+    <div class="result-footer" id="resultFooter" style="display:none">
+      Detected at <span id="rTimestamp">—</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────
+let paused       = false;
+let detectCount  = 0;
+let scanInterval = null;
+let lastScanTime = null;
+let lastTickStr  = "—";
+
+// ── Camera offline detection ──────────────────────────────
+const streamImg = document.getElementById('streamImg');
+streamImg.addEventListener('error', () => {
+  document.getElementById('streamOffline').style.display = 'flex';
+  document.querySelector('.live-badge').style.display    = 'none';
+});
+streamImg.addEventListener('load', () => {
+  document.getElementById('streamOffline').style.display = 'none';
+  document.querySelector('.live-badge').style.display    = 'flex';
+});
+
+// ── Capture frame from stream img ─────────────────────────
+function captureFrame() {
+  const canvas = document.getElementById('captureCanvas');
+  const img    = streamImg;
+  canvas.width  = img.naturalWidth  || img.width  || 640;
+  canvas.height = img.naturalHeight || img.height || 480;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const dataURL = canvas.toDataURL('image/jpeg', 0.7);
+  return dataURL.split(',')[1];   // strip data:image/jpeg;base64,
+}
+
+// ── Send frame to /analyze ────────────────────────────────
+async function doScan() {
+  if (paused) return;
+  setStatus('scanning');
+  try {
+    const b64 = captureFrame();
+    const res  = await fetch('/analyze', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ image: b64 })
+    });
+    const data = await res.json();
+    lastScanTime = Date.now();
+
+    if (data.detected) {
+      detectCount++;
+      document.getElementById('detectCount').textContent = detectCount;
+      renderResult(data);
+      flashDetect();
+    }
+    setStatus('idle');
+  } catch (e) {
+    setStatus('error');
+    setTimeout(() => setStatus('idle'), 2000);
+  }
+}
+
+// ── Render result ─────────────────────────────────────────
+function renderResult(r) {
+  // Hide placeholder, show content
+  document.getElementById('placeholder').style.display   = 'none';
+  document.getElementById('resultFooter').style.display  = 'block';
+  const content = document.getElementById('resultContent');
+  content.classList.add('visible');
+
+  // Reset animation
+  document.querySelectorAll('.r-section').forEach(el => el.classList.remove('in'));
+
+  // Fill fields
+  document.getElementById('rItemName').textContent = r.item_name || '—';
+  document.getElementById('rDescription').textContent = r.description || '—';
+  document.getElementById('rPrice').textContent =
+    r.price_low && r.price_high ? `$${r.price_low} – $${r.price_high}` : '—';
+
+  // Category badge
+  const catEl  = document.getElementById('rCategory');
+  const catKey = (r.category || '').toLowerCase().replace(/[^a-z]/g, '');
+  catEl.textContent  = r.category || '—';
+  catEl.className    = 'cat-' + (['tops','bottoms','outerwear','footwear','accessory'].includes(catKey)
+    ? catKey : 'default');
+
+  // Tags
+  const tagsWrap = document.getElementById('rTags');
+  tagsWrap.innerHTML = (r.style_tags || [])
+    .map(t => `<span class="style-tag">${esc(t)}</span>`).join('');
+
+  // Brands
+  const brands = (r.brand_guesses || []).map(b => `<span>${esc(b)}</span>`).join(', ');
+  document.getElementById('rBrands').innerHTML = brands || '—';
+
+  // Search links
+  const links = document.getElementById('rLinks');
+  links.innerHTML = (r.search_queries || []).map(q => {
+    const url = `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(q)}`;
+    return `<a class="shop-row" href="${url}" target="_blank" rel="noopener">
+      <span>${esc(q)}</span><span class="arrow">↗</span>
+    </a>`;
+  }).join('');
+
+  // Timestamp
+  document.getElementById('rTimestamp').textContent = new Date().toLocaleTimeString();
+
+  // Staggered fade-in
+  document.querySelectorAll('.r-section').forEach((el, i) => {
+    setTimeout(() => el.classList.add('in'), i * 50);
+  });
+}
+
+// ── Flash stream border on detection ─────────────────────
+function flashDetect() {
+  const wrap = document.getElementById('streamWrap');
+  wrap.classList.remove('flash-detect');
+  void wrap.offsetWidth;
+  wrap.classList.add('flash-detect');
+}
+
+// ── Status indicator ──────────────────────────────────────
+function setStatus(s) {
+  const el = document.getElementById('scanStatus');
+  el.className = '';
+  if (s === 'scanning') { el.textContent = 'scanning...'; el.className = 'scanning'; }
+  else if (s === 'error')  { el.textContent = 'error'; el.style.color = '#ff6b6b'; }
+  else                     { el.textContent = 'idle'; }
+}
+
+// ── "Last scan" ticker ────────────────────────────────────
+setInterval(() => {
+  if (!lastScanTime) return;
+  const secs = Math.round((Date.now() - lastScanTime) / 1000);
+  document.getElementById('lastScan').textContent =
+    `Last scan: ${secs}s ago`;
+}, 1000);
+
+// ── Auto-scan loop (every 4 seconds) ──────────────────────
+function startLoop() {
+  if (scanInterval) clearInterval(scanInterval);
+  scanInterval = setInterval(doScan, 4000);
+}
+startLoop();
+
+// ── Controls ──────────────────────────────────────────────
+document.getElementById('pauseBtn').addEventListener('click', () => {
+  paused = !paused;
+  const btn = document.getElementById('pauseBtn');
+  if (paused) {
+    btn.textContent = '▶ RESUME';
+    btn.classList.add('paused');
+    clearInterval(scanInterval);
+    setStatus('idle');
+  } else {
+    btn.textContent = '⏸ PAUSE';
+    btn.classList.remove('paused');
+    startLoop();
+  }
+});
+
+document.getElementById('scanNowBtn').addEventListener('click', () => {
+  doScan();
+  // Reset interval so next auto-scan is 4s from now
+  if (!paused) startLoop();
+});
+
+// ── Helpers ────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

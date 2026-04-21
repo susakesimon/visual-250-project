@@ -56,6 +56,20 @@
   #camOverlay svg { opacity: .7; }
   #camOverlay h2 { font-size: 1.2rem; font-weight: 700; }
   #camOverlay p  { font-size: .85rem; color: var(--muted); text-align: center; max-width: 300px; line-height: 1.6; }
+  #keyInput {
+    width: 100%;
+    max-width: 340px;
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: .82rem;
+    font-family: monospace;
+    outline: none;
+    text-align: center;
+  }
+  #keyInput:focus { border-color: var(--accent); }
   #allowBtn {
     padding: 12px 32px;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -288,6 +302,7 @@
   </svg>
   <h2>Camera Access Needed</h2>
   <p>ClothingID uses your camera to capture clothing items and identify them with AI.</p>
+  <input id="keyInput" type="password" placeholder="Paste Anthropic API key (sk-ant-...)" autocomplete="off"/>
   <button id="allowBtn">Allow Camera</button>
   <span id="camError"></span>
 </div>
@@ -327,7 +342,16 @@
 </main>
 
 <script>
-const API_KEY   = 'YOUR_ANTHROPIC_API_KEY_HERE';
+const STORAGE_KEY = 'clothingid_apikey';
+const keyInput    = document.getElementById('keyInput');
+
+// seed from build-time key; user can override by typing in the field
+const _BAKED_KEY = '';
+localStorage.setItem(STORAGE_KEY, _BAKED_KEY);
+
+function getApiKey() {
+  return keyInput.value.trim() || localStorage.getItem(STORAGE_KEY) || '';
+}
 
 const video     = document.getElementById('video');
 const canvas    = document.getElementById('canvas');
@@ -386,8 +410,15 @@ scanBtn.addEventListener('click', async () => {
   scanBtn.disabled = true;
   resultBox.innerHTML = '<div class="placeholder"><div class="spinner"></div>Analysing…</div>';
 
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    resultBox.innerHTML = '<div class="error-msg">⚠ Paste your Anthropic API key in the startup screen first.</div>';
+    scanBtn.disabled = false;
+    return;
+  }
+
   try {
-    const raw = await callClaude(API_KEY, b64data);
+    const raw = await callClaude(apiKey, b64data);
     renderResult(raw, thumbSrc);
   } catch (e) {
     resultBox.innerHTML = `<div class="error-msg">⚠ ${e.message}</div>`;
