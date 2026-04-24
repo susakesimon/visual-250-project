@@ -43,7 +43,7 @@ ANTHROPIC_API_KEY = "sk-ant-..."        # ← paste your key
 ### 2. Install server deps (laptop)
 
 ```bash
-pip install flask anthropic "serpapi[google_search_results]"
+pip install flask anthropic "serpapi[google_search_results]" scikit-learn numpy
 ```
 
 ### 3. Install Pi deps
