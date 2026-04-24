@@ -1,90 +1,80 @@
-# ClothingID — EE250 Vision System (SSE edition)
+# ClothingID — EE250 Vision System
 
 **Team Members:** Simon Solomon, Stephanie Muoka
 
-Three-node IoT pipeline: Pi camera → Flask server → browser/terminal display.
-No MQTT broker needed. No ESP32 required.
+IoT clothing identification system: Pi camera streams live video → browser dashboard runs Claude AI analysis → shopping links open on any device on the same network.
 
-## Architecture
+---
+
+## How it works
 
 ```
-[Pi camera node]
-   pi_camera.py
-       │ polls /trigger-check (HTTP GET, every 2s)
-       │ uploads image (HTTP POST /analyze)
+[Raspberry Pi]
+   ee250-visual-search/pi/stream_server.py
+       │ opens USB/CSI camera
+       │ serves live MJPEG stream  → GET /video_feed
+       │ serves embedded dashboard → GET /
+       │ exposes snapshot endpoint → GET /snapshot
        ▼
-[Flask server — 10.23.198.21:5000]
-   server.py
-       │ calls Claude vision API
-       │ calls SerpApi (Google Shopping)
-       │ broadcasts result via Server-Sent Events
-       ├─► GET /stream  ──────────────────────────► [Node 3B — browser]
-       │                                                dashboard.html
-       └─► GET /latest  ──────────────────────────► [Node 3A — terminal]
-                                                        display.py
+[Same WiFi network]
+       │
+       ▼
+[Laptop / any device — browser only, no install needed]
+   Open http://<Pi-IP>:5000
+       • watches live camera feed
+       • clicks "Scan Item" or waits for auto-scan (every 4s)
+       • browser calls Claude API directly with the snapshot
+       • results + Google Shopping links appear on screen
+       • clicking a link opens Google Shopping on the laptop
 ```
 
-**Why SSE over MQTT?**
-SSE is HTTP-native (no broker process, no extra library), inherently one-directional
-(server→client — exactly what a display node needs), and auto-reconnects on drop.
-Simpler dependency graph, easier to explain in a write-up.
+**Why run the server on the Pi?**
+Everything is self-contained — one file, one process. The laptop is just a browser; no Python setup required on it. The Pi auto-detects its IP and prints the URL on startup.
 
 ---
 
 ## Quick-start
 
-### 1. Edit `config.py` — two lines only
+### 1. Set up the Pi
 
-```python
-ANTHROPIC_API_KEY = "sk-ant-..."        # ← paste your key
-# SERVER_IP is already set to 10.23.198.21
+Copy the project to the Pi, then create a `.env` file next to `stream_server.py`:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### 2. Install server deps (laptop)
+### 2. Install Pi deps
 
 ```bash
-pip install flask anthropic "serpapi[google_search_results]" scikit-learn numpy
+pip install flask python-dotenv opencv-python requests
 ```
 
-### 3. Install Pi deps
+### 3. Run on the Pi
 
 ```bash
-pip install requests pillow picamera2
-# OLED optional: pip install luma.oled
-# OpenCV fallback: pip install opencv-python-headless
+cd ee250-visual-search/pi
+python stream_server.py
 ```
 
-### 4. Run
-
-```bash
-# Laptop — terminal 1
-python server.py
-# → http://10.23.198.21:5000  (dashboard)
-
-# Pi — terminal
-python pi_camera.py
-
-# Node 3A — any laptop on same WiFi
-python display.py
-
-# Node 3B — open in any browser
-open http://10.23.198.21:5000
+The terminal will print:
+```
+--------------------------------------------------
+  Dashboard:  http://10.x.x.x:5000
+  Stream:     http://10.x.x.x:5000/video_feed
+--------------------------------------------------
 ```
 
-### 5. Trigger a scan
+### 4. Open on the laptop
 
-- **Dashboard** → click the **▶ Capture** button (sets server flag → Pi picks it up)
-- **GPIO button** → set `GPIO_BUTTON_PIN` in `pi_camera.py` to your BCM pin
-- **curl** → `curl -X POST http://10.23.198.21:5000/trigger`
+Make sure the laptop is on the **same WiFi network** as the Pi, then open the printed URL in any browser.
 
-### 6. Curl test (no Pi needed)
+### 5. Scan
 
-```bash
-B64=$(base64 -i test.jpg)
-curl -X POST http://10.23.198.21:5000/analyze \
-     -H "Content-Type: application/json" \
-     -d "{\"image\":\"$B64\"}" | python -m json.tool
-```
+- **Auto mode** — dashboard scans automatically every 4 seconds
+- **Manual** — click **Scan Item** to trigger immediately
+- **Pause** — click the **⏸ Auto** button to stop auto-scanning
+
+Results show the identified item, style description, tags, brand guesses, price range, and Google Shopping links. Clicking any link opens it on your laptop.
 
 ---
 
@@ -92,39 +82,55 @@ curl -X POST http://10.23.198.21:5000/analyze \
 
 ```
 VisualProject/
-├── index.html       standalone browser demo (webcam → Claude direct)
-├── config.py        all configuration — edit once
-├── server.py        Flask + SSE + Claude + SerpApi + trend scoring
-├── trend_scorer.py  K-Means clustering — tracks item popularity across scans
-├── pi_camera.py     Node 1 — Pi capture → HTTP POST
-├── display.py       Node 3A — terminal OLED mimic
-├── dashboard.html   Node 3B — browser dashboard (served by Flask at /)
+├── ee250-visual-search/
+│   └── pi/
+│       └── stream_server.py   ← main file — run this on the Pi
+├── server.py                  extended SSE version with trend scoring (laptop server)
+├── trend_scorer.py            K-Means clustering — tracks item popularity across scans
+├── dashboard.html             SSE dashboard for the extended server.py setup
+├── pi_camera.py               Pi camera node for the extended server.py setup
+├── display.py                 terminal display node for the extended server.py setup
+├── index.html                 standalone browser demo (webcam → Claude direct)
+├── config.py                  configuration for the extended server.py setup
 └── README.md
 ```
+
+---
 
 ## External libraries
 
 | Library | Where used | Install |
 |---------|-----------|---------|
-| [Flask](https://flask.palletsprojects.com/) | HTTP server, SSE stream, static file serving | `pip install flask` |
-| [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python) | Claude vision API (image → JSON analysis) | `pip install anthropic` |
-| [SerpApi](https://serpapi.com/) | Google Shopping search results | `pip install "serpapi[google_search_results]"` |
-| [Requests](https://docs.python-requests.org/) | Pi node HTTP client (POST image, GET trigger) | `pip install requests` |
-| [Pillow](https://python-pillow.org/) | JPEG capture and resizing on the Pi | `pip install pillow` |
-| [Picamera2](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf) | Raspberry Pi camera interface | `pip install picamera2` |
+| [Flask](https://flask.palletsprojects.com/) | HTTP server, MJPEG stream, dashboard serving | `pip install flask` |
+| [OpenCV (cv2)](https://opencv.org/) | Camera capture and JPEG encoding on the Pi | `pip install opencv-python` |
+| [python-dotenv](https://pypi.org/project/python-dotenv/) | Load `ANTHROPIC_API_KEY` from `.env` file | `pip install python-dotenv` |
+| [Requests](https://docs.python-requests.org/) | HTTP client calls from Pi to Claude API | `pip install requests` |
+| [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python) | Claude vision API in extended server.py mode | `pip install anthropic` |
+| [SerpApi](https://serpapi.com/) | Google Shopping results in extended server.py mode | `pip install "serpapi[google_search_results]"` |
 | [scikit-learn](https://scikit-learn.org/) | K-Means clustering for trend scoring | `pip install scikit-learn` |
 | [NumPy](https://numpy.org/) | Feature vector math inside trend scorer | `pip install numpy` |
-| luma.oled *(optional)* | Physical SSD1306 OLED display on Pi | `pip install luma.oled` |
-| opencv-python-headless *(optional)* | Fallback camera capture if Picamera2 unavailable | `pip install opencv-python-headless` |
+| [Pillow](https://python-pillow.org/) | JPEG handling in extended Pi camera node | `pip install pillow` |
+| [Picamera2](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf) | Native Pi camera interface (extended mode) | `pip install picamera2` |
 
 ---
 
 ## Protocol reference
 
+### `stream_server.py` endpoints (Pi)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | Serve embedded dashboard |
+| `/video_feed` | GET | Live MJPEG camera stream |
+| `/snapshot` | GET | Current frame as base64 JSON (used by dashboard to send to Claude) |
+| `/analyze` | POST | Server-side Claude analysis (unused in browser-direct mode) |
+
+### `server.py` endpoints (extended mode, runs on laptop)
+
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/` | GET | Serve dashboard.html |
-| `/analyze` | POST | Upload image (base64 JSON) → get analysis JSON |
+| `/analyze` | POST | Upload image → Claude + SerpApi → analysis JSON |
 | `/stream` | GET | SSE stream — subscribe for live results |
 | `/latest` | GET | Most recent result as JSON (polling fallback) |
 | `/trigger` | POST | Signal Pi to capture (dashboard button → Pi poll) |
