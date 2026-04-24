@@ -1,5 +1,7 @@
 # ClothingID — EE250 Vision System (SSE edition)
 
+**Team Members:** Simon Solomon, Stephanie Muoka
+
 Three-node IoT pipeline: Pi camera → Flask server → browser/terminal display.
 No MQTT broker needed. No ESP32 required.
 
@@ -92,12 +94,30 @@ curl -X POST http://10.23.198.21:5000/analyze \
 VisualProject/
 ├── index.html       standalone browser demo (webcam → Claude direct)
 ├── config.py        all configuration — edit once
-├── server.py        Flask + SSE + Claude + SerpApi
+├── server.py        Flask + SSE + Claude + SerpApi + trend scoring
+├── trend_scorer.py  K-Means clustering — tracks item popularity across scans
 ├── pi_camera.py     Node 1 — Pi capture → HTTP POST
 ├── display.py       Node 3A — terminal OLED mimic
 ├── dashboard.html   Node 3B — browser dashboard (served by Flask at /)
 └── README.md
 ```
+
+## External libraries
+
+| Library | Where used | Install |
+|---------|-----------|---------|
+| [Flask](https://flask.palletsprojects.com/) | HTTP server, SSE stream, static file serving | `pip install flask` |
+| [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python) | Claude vision API (image → JSON analysis) | `pip install anthropic` |
+| [SerpApi](https://serpapi.com/) | Google Shopping search results | `pip install "serpapi[google_search_results]"` |
+| [Requests](https://docs.python-requests.org/) | Pi node HTTP client (POST image, GET trigger) | `pip install requests` |
+| [Pillow](https://python-pillow.org/) | JPEG capture and resizing on the Pi | `pip install pillow` |
+| [Picamera2](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf) | Raspberry Pi camera interface | `pip install picamera2` |
+| [scikit-learn](https://scikit-learn.org/) | K-Means clustering for trend scoring | `pip install scikit-learn` |
+| [NumPy](https://numpy.org/) | Feature vector math inside trend scorer | `pip install numpy` |
+| luma.oled *(optional)* | Physical SSD1306 OLED display on Pi | `pip install luma.oled` |
+| opencv-python-headless *(optional)* | Fallback camera capture if Picamera2 unavailable | `pip install opencv-python-headless` |
+
+---
 
 ## Protocol reference
 
@@ -109,4 +129,5 @@ VisualProject/
 | `/latest` | GET | Most recent result as JSON (polling fallback) |
 | `/trigger` | POST | Signal Pi to capture (dashboard button → Pi poll) |
 | `/trigger-check` | GET | Pi calls this; returns `{trigger: true/false}` |
+| `/reset` | POST | Clear trend session data (resets K-Means history) |
 | `/health` | GET | Server status + connected SSE client count |

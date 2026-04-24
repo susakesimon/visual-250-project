@@ -20,6 +20,7 @@ from typing import Optional
 import anthropic
 from flask import Flask, Response, jsonify, request, send_from_directory
 from serpapi import GoogleSearch
+from trend_scorer import update_trend_score, reset as reset_trend_data
 from config import (
     ANTHROPIC_API_KEY, SERPAPI_KEY, SERVER_IP,
     FLASK_HOST, FLASK_PORT,
@@ -132,6 +133,16 @@ def analyse_image(b64: str, media_type: str = "image/jpeg") -> dict:
             log.warning("SerpApi error for '%s': %s", query, e)
 
     result["shopping_results"] = shopping
+
+    trend = update_trend_score(
+        item_type=result.get("item_name", "unknown"),
+        confidence="high",
+        products=shopping,
+    )
+    result["trend_label"] = trend["trend_label"]
+    result["trend_score"] = trend["trend_score"]
+    result["item_count"]  = trend["item_count"]
+
     result["timestamp"] = time.strftime("%H:%M:%S")
     return result
 
@@ -199,6 +210,13 @@ def trigger_check():
     if fired:
         _trigger_flag.clear()
     return jsonify({"trigger": fired})
+
+
+@app.route("/reset", methods=["POST"])
+def reset_trends():
+    reset_trend_data()
+    log.info("Trend data reset")
+    return jsonify({"ok": True})
 
 
 @app.route("/health")

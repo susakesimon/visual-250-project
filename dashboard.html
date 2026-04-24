@@ -329,6 +329,52 @@
 
   .shop-price { font-size: .9rem; color: var(--yellow); white-space: nowrap; }
 
+  /* trend section */
+  .trend-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+
+  .trend-badge {
+    padding: 4px 14px;
+    font-size: .78rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .trend-badge.cold     { color: var(--muted); }
+  .trend-badge.rising   { color: var(--yellow); }
+  .trend-badge.trending { color: var(--magenta); }
+  .trend-badge.viral    { color: #ff4444; text-shadow: 0 0 8px rgba(255,68,68,.5); }
+
+  .trend-meter {
+    flex: 1;
+    height: 3px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .trend-fill {
+    height: 100%;
+    width: 0%;
+    transition: width .6s ease, background .6s ease;
+  }
+
+  .trend-score-val {
+    font-size: .78rem;
+    color: var(--muted);
+    min-width: 28px;
+    text-align: right;
+  }
+
+  .trend-count {
+    font-size: .7rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
   /* timestamp footer */
   #tsFooter {
     font-size: .7rem;
@@ -351,6 +397,7 @@
     <span id="connStatus" class="waiting">◉ connecting…</span>
     <span>SCANS <span id="scanCount" style="color:var(--cyan)">0</span></span>
     <button id="captureBtn">▶ Capture</button>
+    <button id="resetBtn" style="padding:8px 14px;background:transparent;border:1px solid var(--muted);color:var(--muted);font-family:inherit;font-size:.75rem;letter-spacing:2px;text-transform:uppercase;cursor:pointer;" title="Reset trend session">↺ Reset</button>
   </div>
 </header>
 
@@ -383,6 +430,16 @@
       <div class="item-name" id="itemName">—</div>
       <div class="price-range" id="priceRange">—</div>
       <div class="style-desc" id="styleDesc">—</div>
+    </div>
+
+    <div class="section" id="secTrend">
+      <div class="section-label">Trend Score</div>
+      <div class="trend-row">
+        <span class="trend-badge cold" id="trendBadge">—</span>
+        <div class="trend-meter"><div class="trend-fill" id="trendFill"></div></div>
+        <span class="trend-score-val" id="trendScoreVal">0</span>
+      </div>
+      <div class="trend-count">Scanned <span id="trendCount">0</span>× this session</div>
     </div>
 
     <div class="section" id="secTags">
@@ -465,14 +522,34 @@ function render(r) {
   document.getElementById("captureBtn").textContent = "▶ Capture";
 
   // OLED mimic
-  const tags3 = (r.tags || []).slice(0,3).map(t => "#"+t).join(" ");
+  const trendLine = r.trend_label
+    ? `${r.trend_label.toUpperCase()} · ${r.trend_score}pts`
+    : "";
   oledUpdate(
     (r.item_name || "?").substring(0, 21),
     r.price_range || "",
-    tags3.substring(0, 21),
+    trendLine.substring(0, 21),
     (r.brand_guesses || []).join(" / ").substring(0, 21)
   );
   flashOled();
+
+  // Trend
+  if (r.trend_label) {
+    const colorMap = {
+      Cold:     "var(--muted)",
+      Rising:   "var(--yellow)",
+      Trending: "var(--magenta)",
+      Viral:    "#ff4444",
+    };
+    const badge = document.getElementById("trendBadge");
+    badge.textContent = r.trend_label;
+    badge.className   = "trend-badge " + r.trend_label.toLowerCase();
+    const fill = document.getElementById("trendFill");
+    fill.style.width      = (r.trend_score || 0) + "%";
+    fill.style.background = colorMap[r.trend_label] || "var(--muted)";
+    document.getElementById("trendScoreVal").textContent = r.trend_score || 0;
+    document.getElementById("trendCount").textContent    = r.item_count  || 1;
+  }
 
   // Main info
   document.getElementById("itemName").textContent  = r.item_name  || "—";
@@ -509,7 +586,7 @@ function render(r) {
 
   // Show sections, hide empty state
   document.getElementById("emptyState").style.display = "none";
-  ["secMain","secTags","secBrands","secShop"].forEach(id =>
+  ["secMain","secTrend","secTags","secBrands","secShop"].forEach(id =>
     document.getElementById(id).classList.add("visible"));
 }
 
@@ -533,6 +610,17 @@ function esc(s) {
   return String(s||"")
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
+
+// ── Reset button ───────────────────────────────────────────
+document.getElementById("resetBtn").addEventListener("click", async () => {
+  if (!confirm("Reset trend session? All scan history will be cleared.")) return;
+  await fetch(`${SERVER}/reset`, { method: "POST" });
+  document.getElementById("trendBadge").textContent  = "—";
+  document.getElementById("trendBadge").className    = "trend-badge cold";
+  document.getElementById("trendFill").style.width   = "0%";
+  document.getElementById("trendScoreVal").textContent = "0";
+  document.getElementById("trendCount").textContent  = "0";
+});
 
 // ── Boot ───────────────────────────────────────────────────
 connectSSE();
